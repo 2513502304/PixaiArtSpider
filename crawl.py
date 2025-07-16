@@ -84,6 +84,9 @@ class PixaiArtHome(PixaiArt):
         super().__init__()
 
         self.sort_type: SortType = sort_type
+        available_sort_types = [SortType.RECOMMEND, SortType.TRENDING, SortType.DAILY, SortType.FOLLOWING, SortType.MOST_LIKE, SortType.LATEST]
+        if self.sort_type not in available_sort_types:
+            raise ValueError(f"Invalid sort type: {self.sort_type}, must be one of {available_sort_types}")
 
     async def raw_artworks(self, query: str = '', delay: float = 0.5) -> list[dict]:
         """
@@ -456,9 +459,9 @@ class PixaiArtSearch(PixaiArt):
         super().__init__()
 
         self.sort_type: SortType = sort_type
-
-        if self.sort_type not in [SortType.TRENDING, SortType.DAILY, SortType.MOST_LIKE, SortType.LATEST]:
-            raise ValueError(f"Invalid sort type: {self.sort_type}")
+        available_sort_types = [SortType.TRENDING, SortType.DAILY, SortType.MOST_LIKE, SortType.LATEST]
+        if self.sort_type not in available_sort_types:
+            raise ValueError(f"Invalid sort type: {self.sort_type}, must be one of {available_sort_types}")
 
     async def raw_artworks(self, query: str = '', delay: float = 0.5) -> list[dict]:
         """
