@@ -55,7 +55,11 @@ class PixaiArt(ABC):
         self.client = httpx.AsyncClient(headers=self.headers, base_url=self.host, timeout=30.0)
 
     @abstractmethod
-    async def raw_artworks(self, query: str = '', delay: float = 0.5) -> list[dict]:
+    async def raw_artworks(
+        self,
+        query: str = '',
+        delay: float = 0.5,
+    ) -> list[dict]:
         """
         获取作品集元数据
         
@@ -63,6 +67,28 @@ class PixaiArt(ABC):
             query (str, optional): 关键字搜索参数. Defaults to ''.
             delay (float, optional): 爬虫延时，单位为秒，避免请求过快被服务器拒绝. Defaults to 0.5.
             
+        Returns:
+            list[dict]: 作品集元数据
+        """
+        raise NotImplementedError("This method should be implemented by subclasses.")
+
+    @abstractmethod
+    async def raw_artworks_by_daily(
+        self,
+        query: str = '',
+        delay: float = 0.5,
+        start_day: str | None = None,
+        end_day: str | None = None,
+    ) -> list[dict]:
+        """
+        获取作品集元数据，并通过时间段筛选
+
+        Args:
+            query (str, optional): 关键字搜索参数. Defaults to ''.
+            delay (float, optional): 爬虫延时，单位为秒，避免请求过快被服务器拒绝. Defaults to 0.5.
+            start_day (str, optional): 起始日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认从第一条记录的时间开始.
+            end_day (str, optional): 结束日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认到最后一条记录的时间结束.
+
         Returns:
             list[dict]: 作品集元数据
         """
@@ -440,6 +466,27 @@ class PixaiArtHome(PixaiArt):
 
         return edges
 
+    async def raw_artworks_by_daily(
+        self,
+        query: str = '',
+        delay: float = 0.5,
+        start_day: str | None = None,
+        end_day: str | None = None,
+    ) -> list[dict]:
+        """
+        获取作品集元数据，并通过时间段筛选
+
+        Args:
+            query (str, optional): 关键字搜索参数. Defaults to ''.
+            delay (float, optional): 爬虫延时，单位为秒，避免请求过快被服务器拒绝. Defaults to 0.5.
+            start_day (str, optional): 起始日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认从第一条记录的时间开始.
+            end_day (str, optional): 结束日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认到最后一条记录的时间结束.
+
+        Returns:
+            list[dict]: 作品集元数据
+        """
+        raise NotImplementedError("Home crawler does not support date filtering. Use PixaiArtSearch for keyword search with date filtering.")
+
 
 class PixaiArtSearch(PixaiArt):
     """
@@ -729,6 +776,106 @@ class PixaiArtSearch(PixaiArt):
             json_data['variables']['orderBy'] = SortType.MOST_LIKE.value
         elif self.sort_type == SortType.LATEST:
             json_data['variables']['feed'] = SortType.LATEST.value
+        response = await self.client.post(url=url, params=params, json=json_data)
+
+        # 作品集
+        artworks = response.json()['data']['artworks']
+
+        # 主体数据
+        edges: list[dict] = artworks['edges']
+        # 分页信息
+        pageInfo: dict = artworks['pageInfo']
+
+        # 判断是否存在下一页，并获取 endCursor 作为请求下一页的 json 表单参数
+        hasNextPage = pageInfo['hasNextPage']
+        hasPreviousPage = pageInfo['hasPreviousPage']
+        endCursor = pageInfo['endCursor']
+        startCursor = pageInfo['startCursor']
+        while hasNextPage:
+            # 避免请求过快被服务器拒绝
+            time.sleep(delay)
+
+            # 发起下一次请求
+            json_data['variables']['after'] = endCursor
+            response = await self.client.post(url=url, params=params, json=json_data)
+            artworks = response.json()['data']['artworks']
+
+            # 累加作品集数据
+            edges.extend(artworks['edges'])
+
+            # 更新分页信息
+            pageInfo = artworks['pageInfo']
+
+            hasNextPage = pageInfo['hasNextPage']
+            hasPreviousPage = pageInfo['hasPreviousPage']
+            endCursor = pageInfo['endCursor']
+            startCursor = pageInfo['startCursor']
+
+        return edges
+
+    async def raw_artworks_by_daily(
+        self,
+        query: str = '',
+        delay: float = 0.5,
+        start_day: str | None = None,
+        end_day: str | None = None,
+    ) -> list[dict]:
+        """
+        获取作品集元数据，并通过时间段筛选
+
+        Args:
+            query (str, optional): 关键字搜索参数. Defaults to ''.
+            delay (float, optional): 爬虫延时，单位为秒，避免请求过快被服务器拒绝. Defaults to 0.5.
+            start_day (str, optional): 起始日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认从第一条记录的时间开始.
+            end_day (str, optional): 结束日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认到最后一条记录的时间结束.
+
+        Returns:
+            list[dict]: 作品集元数据
+            
+        Return json format please see `raw_artworks` method.
+        """
+        url = '/graphql'
+        params = {
+            'operation': 'listArtworks',
+        }
+        #!Note: post 表单不能同时提供 first 和 last 参数，否则引发以下异常
+        """
+        !provide first and last args:
+        {'errors': [{'message': 'Not support both first and last provided.',
+        'locations': [{'line': 3, 'column': 3}],
+        'path': ['artworks'],
+        'extensions': {'code': 'INVALID_PAGINATION_INPUT',
+            'exception': {'message': 'Not support both first and last provided.'}}}],
+        'data': None}
+        """
+        #!Note: 浏览器控制台中，SortType.TRENDING 与 SortType.LATEST 默认使用的为 before 和 last 参数，SortType.DAILY 与 SortType.MOST_LIKE 默认使用的是 after 和 first 参数
+        #!但经测试，所有 SortType 均可使用 before 和 last 参数，after 和 first 参数，其中 after 和 first 为一固定的参数组合，before 和 last 为一固定的参数组合
+        json_data = {
+            'query':
+            '\n    query listArtworks($before: String, $after: String, $first: Int, $last: Int, $orderBy: String, $isNsfw: Boolean, $tag: String, $q: String, $relevantArtworkId: ID, $keyword: String, $text: String, $hidePrompts: Boolean, $isSafeSearch: Boolean, $feed: String, $authorId: ID, $challenge: Int, $archived: Boolean, $isPrivate: Boolean, $i2vPro: Boolean, $animatedBaseArtworkId: ID, $modelId: ID, $modelVersionId: ID, $loraId: ID, $loraVersionId: ID, $workflowId: ID, $workflowVersionId: ID, $time: DateRange, $type: ArtworkType, $types: [ArtworkType], $rankMediaType: RankMediaType, $worldId: ID, $characterId: ID) {\n  artworks(\n    before: $before\n    after: $after\n    first: $first\n    last: $last\n    orderBy: $orderBy\n    isNsfw: $isNsfw\n    tag: $tag\n    q: $q\n    relevantArtworkId: $relevantArtworkId\n    keyword: $keyword\n    text: $text\n    hidePrompts: $hidePrompts\n    isSafeSearch: $isSafeSearch\n    feed: $feed\n    authorId: $authorId\n    challenge: $challenge\n    archived: $archived\n    isPrivate: $isPrivate\n    i2vPro: $i2vPro\n    animatedBaseArtworkId: $animatedBaseArtworkId\n    modelId: $modelId\n    modelVersionId: $modelVersionId\n    loraId: $loraId\n    loraVersionId: $loraVersionId\n    worldId: $worldId\n    characterId: $characterId\n    workflowId: $workflowId\n    workflowVersionId: $workflowVersionId\n    time: $time\n    type: $type\n    types: $types\n    rankMediaType: $rankMediaType\n  ) {\n    edges {\n      node {\n        ...ArtworkWithMangaPreview\n      }\n      cursor\n    }\n    pageInfo {\n      hasNextPage\n      hasPreviousPage\n      endCursor\n      startCursor\n    }\n  }\n}\n    \n    fragment ArtworkWithMangaPreview on Artwork {\n  ...ArtworkPreview\n  manga {\n    ...MangaBase\n    likedCount\n    liked\n    chapter(index: 0) {\n      ...MangaChapterBase\n    }\n  }\n}\n    \n\n    fragment ArtworkPreview on Artwork {\n  ...ArtworkBase\n  likedCount\n  liked\n  commentCount\n  author {\n    ...UserBase\n  }\n  flag {\n    ...ModerationFlagDetail\n  }\n}\n    \n\n    fragment ArtworkBase on Artwork {\n  __typename\n  id\n  title\n  authorId\n  prompts\n  createdAt\n  updatedAt\n  mediaId\n  media {\n    ...MediaBase\n  }\n  videoMediaId\n  hidePrompts\n  isPrivate\n  isNsfw\n  isSensitive\n  extra\n  type\n  paidCredit\n  aesScore\n  flag {\n    ...ModerationFlagDetail\n  }\n}\n    \n\n    fragment MediaBase on Media {\n  id\n  type\n  width\n  height\n  urls {\n    variant\n    url\n  }\n  imageType\n  fileUrl\n  duration\n  thumbnailUrl\n  hlsUrl\n  size\n  flag {\n    ...ModerationFlagPreview\n  }\n}\n    \n\n    fragment ModerationFlagPreview on ModerationFlag {\n  shouldBlur\n}\n    \n\n    fragment ModerationFlagDetail on ModerationFlag {\n  status\n  isSensitive\n  isMinors\n  isRealistic\n  isFlagged\n  isSexyPic\n  isSexyText\n  shouldBlur\n  isWarned\n  isAppealable\n}\n    \n\n    fragment UserBase on User {\n  id\n  email\n  emailVerified\n  username\n  displayName\n  createdAt\n  updatedAt\n  avatarMediaId\n  membership {\n    membershipId\n    tier\n  }\n  deleteAfter\n  isAdmin\n  aprilFoolsDayProfile: profile(key: "aprilFoolsDay2025")\n  springEventProfile: profile(key: "springEvent2025")\n}\n    \n\n    fragment MangaBase on Manga {\n  __typename\n  id\n  authorId\n  title\n  description\n  coverMediaId\n  coverMedia {\n    ...MediaBase\n  }\n  isNsfw\n  isPrivate\n  isArchived\n  type\n  extra\n  createdAt\n  updatedAt\n  artworkId\n}\n    \n\n    fragment MangaChapterBase on MangaChapter {\n  id\n  mangaId\n  order\n  title\n  coverMediaId\n  coverMedia {\n    ...MediaBase\n  }\n  originalData\n  content\n  createdAt\n  updatedAt\n}\n    ',
+            'variables': {
+                'after': '',
+                'first': 24,
+                'isSafeSearch': True,
+                'q': query,
+            },
+        }
+        # 采用关键字搜索的每日排名策略，但将时间跨度从原先 API 默认的一周更改至用户指定的时间段
+        json_data['variables']['orderBy'] = SortType.MOST_LIKE.value
+        # 获取指定时间段的作品集
+        start_day: datetime = datetime.strptime(start_day, '%Y-%m-%d') if start_day is not None else datetime(2022, 1, 1)  # 网站上线时间（粗略）
+        end_day: datetime = datetime.strptime(end_day, '%Y-%m-%d') if end_day is not None else datetime.now()  # 当前时间
+        # 'time': {  # 注意：gt 和 lt 的值必须是 ISO 8601 格式的字符串，且必须包含毫秒部分
+        #     'gt': '2025-07-08T16:00:00.000Z',
+        #     'lt': '2025-07-16T16:00:00.000Z',
+        # },
+        # 将时间转换为 ISO 8601 格式的字符串，固定毫秒部分为 .000
+        start_day_iso = start_day.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        end_day_iso = end_day.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        json_data['variables']['time'] = {
+            'gt': start_day_iso,
+            'lt': end_day_iso,
+        }
         response = await self.client.post(url=url, params=params, json=json_data)
 
         # 作品集
