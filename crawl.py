@@ -1,17 +1,24 @@
-from pydantic import BaseModel, Field
-from abc import ABC, abstractmethod
-from fake_useragent import UserAgent
-from datetime import datetime, timedelta
-from lxml import etree
-from rich import print
-from enum import Enum, auto
-import numpy as np
-import time
 import asyncio
-import httpx
 import re
+import time
+from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
+from enum import Enum, auto
 
+import httpx
+import numpy as np
+import pandas as pd
+from fake_useragent import UserAgent
+from lxml import etree
 from utils import logger
+
+
+class CrawlType(Enum):
+    """
+    [pixai.art](https://pixai.art/zh) 爬虫类型
+    """
+    HOME = auto()  # 主页
+    SEARCH = auto()  # 关键字搜索
 
 
 class SortType(Enum):
@@ -40,7 +47,7 @@ class SortType(Enum):
     LATEST = 'latest'  # 最新的
 
 
-class PixaiArt(ABC):
+class PixaiArtSpider(ABC):
     """
     [pixai.art](https://pixai.art/zh) 爬虫
     """
@@ -95,7 +102,7 @@ class PixaiArt(ABC):
         raise NotImplementedError("This method should be implemented by subclasses.")
 
 
-class PixaiArtHome(PixaiArt):
+class PixaiArtHome(PixaiArtSpider):
     """
     [pixai.art](https://pixai.art/zh) 主页爬虫
     """
@@ -114,7 +121,11 @@ class PixaiArtHome(PixaiArt):
         if self.sort_type not in available_sort_types:
             raise ValueError(f"Invalid sort type: {self.sort_type}, must be one of {available_sort_types}")
 
-    async def raw_artworks(self, query: str = '', delay: float = 0.5) -> list[dict]:
+    async def raw_artworks(
+        self,
+        query: str = '',
+        delay: float = 0.5,
+    ) -> list[dict]:
         """
         获取主页作品集元数据
         
@@ -488,7 +499,7 @@ class PixaiArtHome(PixaiArt):
         raise NotImplementedError("Home crawler does not support date filtering. Use PixaiArtSearch for keyword search with date filtering.")
 
 
-class PixaiArtSearch(PixaiArt):
+class PixaiArtSearch(PixaiArtSpider):
     """
     [pixai.art](https://pixai.art/zh/search) 关键字搜索爬虫
     """
@@ -510,7 +521,11 @@ class PixaiArtSearch(PixaiArt):
         if self.sort_type not in available_sort_types:
             raise ValueError(f"Invalid sort type: {self.sort_type}, must be one of {available_sort_types}")
 
-    async def raw_artworks(self, query: str = '', delay: float = 0.5) -> list[dict]:
+    async def raw_artworks(
+        self,
+        query: str = '',
+        delay: float = 0.5,
+    ) -> list[dict]:
         """
         获取关键字搜索作品集元数据
         
@@ -865,6 +880,8 @@ class PixaiArtSearch(PixaiArt):
         # 获取指定时间段的作品集
         start_day: datetime = datetime.strptime(start_day, '%Y-%m-%d') if start_day is not None else datetime(2022, 1, 1)  # 网站上线时间（粗略）
         end_day: datetime = datetime.strptime(end_day, '%Y-%m-%d') if end_day is not None else datetime.now()  # 当前时间
+        if start_day > end_day:
+            raise ValueError("start_day must be earlier than end_day")
         # 'time': {  # 注意：gt 和 lt 的值必须是 ISO 8601 格式的字符串，且必须包含毫秒部分
         #     'gt': '2025-07-08T16:00:00.000Z',
         #     'lt': '2025-07-16T16:00:00.000Z',
@@ -912,3 +929,51 @@ class PixaiArtSearch(PixaiArt):
             startCursor = pageInfo['startCursor']
 
         return edges
+
+    async def concurrent_raw_artworks_by_daily(
+        self,
+        query: str = '',
+        delay: float = 0.5,
+        start_day: str | None = None,
+        end_day: str | None = None,
+        max_concurrency_num: int = 8,
+    ) -> list[dict]:
+        """
+        与 `raw_artworks_by_daily` 方法相同，但采用对时间片切分以及批量并发的方式获取作品集元数据
+
+        Args:
+            query (str, optional): 关键字搜索参数. Defaults to ''.
+            delay (float, optional): 爬虫延时，单位为秒，避免请求过快被服务器拒绝. Defaults to 0.5.
+            start_day (str, optional): 起始日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认从第一条记录的时间开始.
+            end_day (str, optional): 结束日期，格式为 'YYYY-MM-DD'，用于筛选作品集. Defaults to None，默认到最后一条记录的时间结束.
+            max_concurrency_num (int, optional): 最大并发数. Defaults to 8.
+
+        Returns:
+            list[dict]: 作品集元数据
+            
+        Return json format please see `raw_artworks` method.
+        """
+        # 获取指定时间段的作品集
+        start_day: datetime = datetime.strptime(start_day, '%Y-%m-%d') if start_day is not None else datetime(2022, 1, 1)  # 网站上线时间（粗略）
+        end_day: datetime = datetime.strptime(end_day, '%Y-%m-%d') if end_day is not None else datetime.now()  # 当前时间
+        if start_day > end_day:
+            raise ValueError("start_day must be earlier than end_day")
+        # 按照并发数量进行时间片切分
+        time_slices: list[tuple[datetime, datetime]] = []  # 时间片序列
+        time_step = (end_day - start_day) / max_concurrency_num  # 时间片步长
+        current_start = start_day
+        while current_start < end_day:
+            current_end = current_start + time_step
+            time_slices.append((current_start, current_end))
+            current_start = current_end
+        # 并发获取每个时间片的作品集元数据
+        tasks = [
+            self.raw_artworks_by_daily(
+                query=query,
+                delay=delay,
+                start_day=current_start.strftime('%Y-%m-%d'),
+                end_day=current_end.strftime('%Y-%m-%d'),
+            ) for current_start, current_end in time_slices
+        ]
+        results: list[list[dict]] = await asyncio.gather(*tasks)
+        return [item for result in results for item in result]
