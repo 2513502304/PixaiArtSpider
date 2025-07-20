@@ -1,6 +1,5 @@
 import asyncio
 import re
-import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum, auto
@@ -457,7 +456,7 @@ class PixaiArtHome(PixaiArtSpider):
         startCursor = pageInfo['startCursor']
         while hasNextPage:
             # 避免请求过快被服务器拒绝
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
             # 发起下一次请求
             json_data['variables']['after'] = endCursor
@@ -808,7 +807,7 @@ class PixaiArtSearch(PixaiArtSpider):
         startCursor = pageInfo['startCursor']
         while hasNextPage:
             # 避免请求过快被服务器拒绝
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
             # 发起下一次请求
             json_data['variables']['after'] = endCursor
@@ -910,7 +909,7 @@ class PixaiArtSearch(PixaiArtSpider):
         startCursor = pageInfo['startCursor']
         while hasNextPage:
             # 避免请求过快被服务器拒绝
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
             # 发起下一次请求
             json_data['variables']['after'] = endCursor
