@@ -773,7 +773,7 @@ class PixaiArtSearch(PixaiArtSpider):
             json_data['variables']['orderBy'] = SortType.MOST_LIKE.value
             # 获取当前时间
             current_time = datetime.now()
-            # 获取 7 天前的时间
+            # 获取 7 天前的时间，将时间跨度与原先 API 默认的一周保持一致
             last_week_time = current_time - timedelta(days=7)
             # 'time': {  # 注意：gt 和 lt 的值必须是 ISO 8601 格式的字符串，且必须包含毫秒部分
             #     'gt': '2025-07-08T16:00:00.000Z',
@@ -877,7 +877,8 @@ class PixaiArtSearch(PixaiArtSpider):
         # 采用关键字搜索的每日排名策略，但将时间跨度从原先 API 默认的一周更改至用户指定的时间段
         json_data['variables']['orderBy'] = SortType.MOST_LIKE.value
         # 获取指定时间段的作品集
-        start_day: datetime = datetime.strptime(start_day, '%Y-%m-%d') if start_day is not None else datetime(2022, 1, 1)  # 网站上线时间（粗略）
+        start_day: datetime = datetime.strptime(start_day, '%Y-%m-%d') if start_day is not None else datetime(
+            2022, 10, 1)  # [网站上线时间（粗略）](https://www.crunchbase.com/organization/mewtant-inc)
         end_day: datetime = datetime.strptime(end_day, '%Y-%m-%d') if end_day is not None else datetime.now()  # 当前时间
         if start_day > end_day:
             raise ValueError("start_day must be earlier than end_day")
@@ -953,13 +954,14 @@ class PixaiArtSearch(PixaiArtSpider):
         Return json format please see `raw_artworks` method.
         """
         # 获取指定时间段的作品集
-        start_day: datetime = datetime.strptime(start_day, '%Y-%m-%d') if start_day is not None else datetime(2022, 1, 1)  # 网站上线时间（粗略）
+        start_day: datetime = datetime.strptime(start_day, '%Y-%m-%d') if start_day is not None else datetime(
+            2022, 10, 1)  # [网站上线时间（粗略）](https://www.crunchbase.com/organization/mewtant-inc)
         end_day: datetime = datetime.strptime(end_day, '%Y-%m-%d') if end_day is not None else datetime.now()  # 当前时间
         if start_day > end_day:
             raise ValueError("start_day must be earlier than end_day")
         # 按照并发数量进行时间片切分
         time_slices: list[tuple[datetime, datetime]] = []  # 时间片序列
-        time_step = (end_day - start_day) / max_concurrency_num  # 时间片步长
+        time_step: timedelta = (end_day - start_day) / max_concurrency_num  # 时间片步长
         current_start = start_day
         while current_start < end_day:
             current_end = current_start + time_step
