@@ -58,7 +58,13 @@ class PixaiArtSpider(ABC):
             'Referer': 'https://pixai.art',
             'Content-Type': 'application/json',
         }
-        self.client = httpx.AsyncClient(headers=self.headers, base_url=self.host, timeout=30.0)
+        self.client = httpx.AsyncClient(
+            headers=self.headers,
+            http1=True,
+            http2=True,
+            base_url=self.host,
+            timeout=30.0,
+        )
 
     @abstractmethod
     async def raw_artworks(
@@ -976,5 +982,5 @@ class PixaiArtSearch(PixaiArtSpider):
                 end_day=current_end.strftime('%Y-%m-%d'),
             ) for current_start, current_end in time_slices
         ]
-        results: list[list[dict]] = await asyncio.gather(*tasks)
+        results: list[list[dict]] = await asyncio.gather(*tasks, return_exceptions=True)
         return [item for result in results for item in result]

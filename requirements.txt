@@ -1,0 +1,9 @@
+aiofiles~=24.1.0
+fake_useragent~=1.2.1
+httpx~=0.28.1
+lxml~=5.3.2
+numpy~=2.3.2
+orjson~=3.11.1
+pandas~=2.3.1
+pydantic~=2.11.7
+rich~=14.1.0
