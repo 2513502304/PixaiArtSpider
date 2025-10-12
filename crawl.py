@@ -983,4 +983,5 @@ class PixaiArtSearch(PixaiArtSpider):
             ) for current_start, current_end in time_slices
         ]
         results: list[list[dict]] = await asyncio.gather(*tasks, return_exceptions=True)
-        return [item for result in results for item in result]
+        return [item for result in results if result for item in result]
+
